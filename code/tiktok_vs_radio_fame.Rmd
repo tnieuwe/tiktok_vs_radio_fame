@@ -1,0 +1,130 @@
+---
+title: "tiktok_vs_radio_code"
+author: "Tim N"
+date: "9/19/2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Intro
+
+## Background of the question
+
+In the modern era of music, the app TikTok is an oppressive force. Some musicians truly find stardom overnight with the app, just needing one song to go viral. It is an amazing tool for musicians as it allows them to circumvent the normal process of needing publicity through touring and labels. That said it also can cause ire, especially within fan-bases. People will say a song has become "TikTokified" basically meaning that a song has blown up on TikTok and now that's the only song anyone cares about.
+
+The idea of "TikTokified" has always interested me, because I am a fan of the musician Alex G, an Indie musician who had found relative success pre-TikTok, but has exploded in popularity in the recent years due to a plethora of his songs going viral (Mary, Pretend, Sarah, 16 Mirrors, Treehouse etc.). A lot of people are now talking about how Alex G is a "TikTok Artist" and that his TikTok fame has ruined his fanbase. I don't really agree that the fanbase has been ruined, and I'm happy for his success because he deserves it, but it makes me wonder if having hits on TikTok is all that different than the good ol' days of radio. Which led me to the following question:
+
+***Is TikTok fame different than radio fame when it comes to the distribution of song listening?***
+
+Because we all understand that back in the day artists had "hits", but those came from the radio, not TikTok. If you were found during the radio era, did it make it more likely people would listen to your entire discography instead of just your main hit? Similarly, if you're a TikTok artist, are people only listening to the songs that have gone viral? Here we're going to test this out. I had to collect all the data manually from Spotify plays as the number of streams is not available in the API so I had to select a few case examples to illustrate different groups.
+
+## Case examples
+
+### Artists with hits
+
+-   **Alex G:** A "TikTok Artist" who has actively been releasing music since 2010. He was definitely succesful in the indie music scene however he had gone from \~500,000 monthly listeners in 2019 to 8 million today due to some viral songs.
+-   **Modest Mouse:** A radio hit indie band active from 1990s to now (with a pause between 2007-2014). They are know for having a couple big hits, the most notable one being Float On, a song I'm sure you've heard of if you are older than 25.
+
+### Control artists
+
+-   **They Are Gutting a Body of Water (tagabow):** A modern slacker/shoegaze band from Philly that started releasing music in 2018. A rising star in the new shoegaze scene, but not a band with big standout hits in my mind. No radio play outside of college radios and no TikTok blowup (yet).
+
+-   **Built To Spill:** A Pacific Northwest indie rock group that came up around the same time of Modest Mouse. A mainstay in the music scene that never experienced the same mainstream success as Modest Mouse. Radio play yes, but not a "top 100" artist.
+
+## "One Hit Wonder" artists:
+
+-   **Vundabar:** A modern indie rock band from Boston that I've been listening to for years. However, they had one song blow up on TikTok while the rest of their catalog never got much play.
+-   **Chumbawamba:** One word, Tubthumping
+
+# Analysis
+
+Set up libraries
+
+```{r}
+library(tidyverse)
+library(spotifyr)
+library(ineq)
+library(scales) 
+```
+
+Set up recurring colors for Alex G albums
+
+```{r}
+alex_album_colors <- c(Race = "deeppink1",
+                       Rules = "black",
+                       Trick = "deepskyblue1",
+                       DSU = "springgreen4",
+                       `Beach Music` = "royalblue4",
+                       Rocket = "red3",
+                       `House of Sugar` = "darkorchid4",
+                       `God Save the Animals` = "gold")
+alex_g_noname_colors <- alex_album_colors
+names(alex_g_noname_colors) <- NULL
+
+```
+
+Load the data
+
+```{r}
+raw_data <- data.table::fread("../data_in/tiktok_vs_radio_fame_comparison.csv",
+                  data.table = FALSE, encoding = "UTF-8") %>%
+  rename(track_name = song_name,
+         album_name = album) %>%
+  mutate(plays = as.numeric(str_remove_all(plays,pattern = ",")),
+         ## Making tagabow abbreviated
+         artist = 
+           ifelse(artist == "They Are Gutting a Body of Water",
+                  "tagabow", artist))
+  
+```
+
+## Explanation of a gini index
+
+A Gini Index is a number between 0 and 1 which represents inequality within the observed dataset. If the value is closer to 0 there is more equality while being closer to 1 implies more inequality. Originally the gini index was created in economics to explore income inequality(CITE), countries that have more income inequality would have a higher gini index, while ones with less inequality would have a lower score.
+
+While this was the original intent of the calculation, since then it had been applied to many different fields, the reason I learned about it is because it is sometimes used in BCR-sequencing to determine if a sample has an uneven distribution of clonal expansion relative to other samples (cite).
+
+Here however we're talking about music, so let's show a minature example of what we'll be doing on later. Below I create a toy dataframe of two musicians who each have five songs, one has a big hit while the other has an even distribution of plays among their songs. Let's see how their Gini indexes differ!
+
+```{r}
+gini_example <- data.frame(songs = c(paste0("song ", 1:5),
+                        paste0("song ", 1:5)),
+             plays = c(10,10,10,10,1000,
+                rep(100, 5)),
+              artists = c(rep("One Hit Wonder Musician", 5),
+                          rep("Well Rounded Musician", 5))
+              ) %>% group_by(artists) %>%
+  mutate(gini_value =paste0("Gini Value: ",round(Gini(plays), 2)))
+
+
+gini_example %>%
+  ggplot(., aes(x = songs, y = plays)) +
+  geom_col() + 
+  facet_grid(~artists)  +
+  scale_y_log10() +
+  labs(y = "Plays (Log10)") +
+   geom_text(data = gini_example %>% filter(songs == "song 3"), 
+            aes(x = songs, y = 800, label = gini_value),
+            inherit.aes = FALSE)
+```
+
+In the above example you can see that one artists has 5 songs, most with around 10 plays, but one with 1000, they have a much higher Gini Index value of 0.76 while the well rounded musician, who has an equal listen among all their songs have a 0. This is just to conceptualize how this approximately works in your mind, let's get on to some real data.
+
+## Preliminary data exploration
+
+The first thing we should probably do is look at the amount of plays per song per artists to see if there are any possible problems with the data and see how they should be handled.
+
+```{r}
+gini_dat <- raw_data %>% group_by(artist) %>%
+  summarize(gini_index = Gini(plays,na.rm = T))
+
+ggplot(gini_dat, aes(x = artist, y = gini_index)) +
+  geom_col()
+
+raw_data %>% group_by(artist) %>% mutate(all_plays = sum(plays), play_percentage = plays/all_plays) %>%
+  ggplot(aes(plays)) +
+  geom_histogram() + facet_wrap(~artist) + scale_x_log10(labels = unit_format(unit = "M", scale = 1e-6))
+```
