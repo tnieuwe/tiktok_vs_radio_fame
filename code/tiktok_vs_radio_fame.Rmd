@@ -77,7 +77,10 @@ raw_data <- data.table::fread("../data_in/tiktok_vs_radio_fame_comparison.csv",
          ## Making tagabow abbreviated
          artist = 
            ifelse(artist == "They Are Gutting a Body of Water",
-                  "tagabow", artist))
+                  "tagabow", artist),
+         date_of_record = mdy(date_of_record),
+         date_on_spotify = mdy(date_on_spotify),
+         time_on_spotify = as.numeric(date_of_record - date_on_spotify))
   
 ```
 
@@ -118,13 +121,57 @@ In the above example you can see that one artists has 5 songs, most with around 
 The first thing we should probably do is look at the amount of plays per song per artists to see if there are any possible problems with the data and see how they should be handled.
 
 ```{r}
+plotting_artist_data <- raw_data %>%
+  group_by(artist) %>%
+  ## Calculate percentage of plays to scale all the data
+  mutate(all_plays = sum(plays),
+         play_percentage = plays/all_plays)
+
+plotting_artist_data %>%
+  ggplot(aes(play_percentage)) +
+  geom_histogram() + facet_wrap(~artist)
+```
+
+This data doesn't look great, because we have some specific artists (our one hit wonders) that are blowing out the x axis on these plots! Tubthumping by Chumbawumba makes up 92% of the plays of all of Chumbawumba's music! Luckily I deal with similar looking data in RNA-seq, and the most basic way to handle this issue is to "log10" the data, see how much better it looks below!
+
+```{r}
+plotting_artist_data %>%
+  ggplot(aes(play_percentage)) +
+  geom_histogram() + facet_wrap(~artist) +
+  scale_x_log10(labels = scales::percent)
+```
+
+When we do this we see that most artists are following a... somewhat normal distribution with clear skews, but there are some clear outliers still with Modest Mouse and tagabow, reverse hits you may say. Let's see what those are real quick.
+
+```{r}
+plotting_artist_data %>% filter(artist == "tagabow") %>%
+  ggplot(aes(fill = album_name, x = play_percentage)) +
+  geom_histogram()  +
+  scale_x_log10(labels = scales::percent)
+```
+
+The peculiar distribution appears to be because of the album "swanlike (loosies 2020-2023). Why is it a problem? Well that's because it's new, it was released June 18th 2024, while this data was collected on July 23rd. Now you may be saying at this point "Uhh dude why aren't you correcting for release date? Shouldn't the variable be "plays/time since release", except for albums that were released pre-spotify and then it should be "plays/time on spotify", and you would be right, but there's two reasons I'm not doing that.
+
+```{r}
+plotting_artist_data %>% filter(artist == "tagabow") %>%
+  mutate(album_release = case_when(
+    album_name == "swanlike (loosies 2020-2023)" ~ "6/18/2024",
+    album_name == "s" ~ "10/17/2022",
+    album_name == "Destiny XL" ~ "10/17/2019",
+    album_name == "gestures been" ~ "04/27/2018"
+  ),
+  album_release = mdy(album_release),
+  time_on_spotify = date_of_record - album_release,
+  plays_per_days_on_spotify = plays/as.numeric(time_on_spotify)) %>%
+  ggplot(aes(fill = album_name, x = plays_per_days_on_spotify)) +
+  geom_histogram()  +
+  scale_x_log10()
+```
+
+```{r}
 gini_dat <- raw_data %>% group_by(artist) %>%
   summarize(gini_index = Gini(plays,na.rm = T))
 
 ggplot(gini_dat, aes(x = artist, y = gini_index)) +
   geom_col()
-
-raw_data %>% group_by(artist) %>% mutate(all_plays = sum(plays), play_percentage = plays/all_plays) %>%
-  ggplot(aes(plays)) +
-  geom_histogram() + facet_wrap(~artist) + scale_x_log10(labels = unit_format(unit = "M", scale = 1e-6))
 ```
