@@ -80,7 +80,9 @@ raw_data <- data.table::fread("../data_in/tiktok_vs_radio_fame_comparison.csv",
                   "tagabow", artist),
          date_of_record = mdy(date_of_record),
          date_on_spotify = mdy(date_on_spotify),
-         time_on_spotify = as.numeric(date_of_record - date_on_spotify))
+         time_on_spotify = as.numeric(date_of_record -
+                                        date_on_spotify),
+         plays_per_day = plays/time_on_spotify)
   
 ```
 
@@ -125,7 +127,9 @@ plotting_artist_data <- raw_data %>%
   group_by(artist) %>%
   ## Calculate percentage of plays to scale all the data
   mutate(all_plays = sum(plays),
-         play_percentage = plays/all_plays)
+         all_plays_scaled = sum(plays_per_day),
+         play_percentage = plays/all_plays,
+         ppd_percentage = plays_per_day/all_plays_scaled)
 
 plotting_artist_data %>%
   ggplot(aes(play_percentage)) +
@@ -139,6 +143,11 @@ plotting_artist_data %>%
   ggplot(aes(play_percentage)) +
   geom_histogram() + facet_wrap(~artist) +
   scale_x_log10(labels = scales::percent)
+
+plotting_artist_data %>%
+  ggplot(aes(ppd_percentage)) +
+  geom_histogram() + facet_wrap(~artist) +
+  scale_x_log10(labels = scales::percent)
 ```
 
 When we do this we see that most artists are following a... somewhat normal distribution with clear skews, but there are some clear outliers still with Modest Mouse and tagabow, reverse hits you may say. Let's see what those are real quick.
@@ -150,28 +159,61 @@ plotting_artist_data %>% filter(artist == "tagabow") %>%
   scale_x_log10(labels = scales::percent)
 ```
 
-The peculiar distribution appears to be because of the album "swanlike (loosies 2020-2023). Why is it a problem? Well that's because it's new, it was released June 18th 2024, while this data was collected on July 23rd. Now you may be saying at this point "Uhh dude why aren't you correcting for release date? Shouldn't the variable be "plays/time since release", except for albums that were released pre-spotify and then it should be "plays/time on spotify", and you would be right, but there's two reasons I'm not doing that.
+The peculiar distribution appears to be because of the album "swanlike (loosies 2020-2023). Why is it a problem? Well that's because it's new, it was released June 18th 2024, while this data was collected on July 23rd. Now you may be saying at this point "Uhh dude why aren't you correcting for release date? Shouldn't the variable be 'plays/time since release', except for albums that were released pre-spotify and then it should be 'plays/time on spotify'?", and you would be right! And I already havea corrected version of it!
 
 ```{r}
 plotting_artist_data %>% filter(artist == "tagabow") %>%
-  mutate(album_release = case_when(
-    album_name == "swanlike (loosies 2020-2023)" ~ "6/18/2024",
-    album_name == "s" ~ "10/17/2022",
-    album_name == "Destiny XL" ~ "10/17/2019",
-    album_name == "gestures been" ~ "04/27/2018"
-  ),
-  album_release = mdy(album_release),
-  time_on_spotify = date_of_record - album_release,
-  plays_per_days_on_spotify = plays/as.numeric(time_on_spotify)) %>%
-  ggplot(aes(fill = album_name, x = plays_per_days_on_spotify)) +
+  ggplot(aes(fill = album_name, x = ppd_percentage)) +
   geom_histogram()  +
   scale_x_log10()
 ```
 
-```{r}
-gini_dat <- raw_data %>% group_by(artist) %>%
-  summarize(gini_index = Gini(plays,na.rm = T))
+It might've skewed the swanlike songs as maybe being *too* popular, but it's better than having that previous pseudo bimodal distribution. Now let's see if that fixed Modest Mouse!
 
-ggplot(gini_dat, aes(x = artist, y = gini_index)) +
+*Note*: The album names are to long
+
+```{r}
+plotting_artist_data %>% filter(artist == "Modest Mouse") %>%
+  mutate(album_name = case_when(
+    str_detect(album_name, "Were Dead") ~ "We Were Dead",
+    str_detect(album_name, "Good News") ~ "Good News",
+    str_detect(album_name, "Long Drive") ~ "Long Drive",
+    str_detect(album_name, "Building Nothing") ~ "Building Nothing",
+    str_detect(album_name, "Lonesome Crowded") ~ "Lonesome Crowded",
+    TRUE ~ album_name
+  )) %>%
+  ggplot(aes(fill = album_name, x = ppd_percentage)) +
+  geom_histogram()  +
+  scale_x_log10() 
+```
+
+Huh, so this correction doesn't prevent the outliers. The outliers appear to be from Sad Sappy Sucker and Good News for People Who Love Bad News. Sad Sappy Sucker makes sense, its a peculiar album with a lot of weird songs, but Good News is their most popular album, let's see what's going on.
+
+```{r}
+plotting_artist_data %>% filter(artist == "Modest Mouse") %>% arrange(plays_per_day) %>% head(8) %>% ungroup() %>%select(track_name,album_name, plays)
+```
+
+Ah that makes sense, Horn Intro and Dig Your Grave are sub 15 second interludes. that said Horn intro has 11,227 plays while Dig Your Grave only has 4,518... guess we know how many people start the album vs how many people make it through haha.
+
+```{r}
+gini_dat <- plotting_artist_data %>% group_by(artist) %>%
+  summarize(gini_index_noscale = Gini(plays,na.rm = T),
+            gini_index_scale = Gini(plays_per_day,na.rm = T))
+
+ggplot(gini_dat, aes(x = artist, y = gini_index_noscale)) +
   geom_col()
+ggplot(gini_dat, aes(x = artist, y = gini_index_scale)) +
+  geom_col()
+```
+
+```{r}
+alex_g_only <- raw_data %>%
+  filter(artist == "Alex G") %>%
+  ## Calculate percentage of plays to scale all the data
+  mutate(all_plays = sum(plays),
+         all_plays_scaled = sum(plays_per_day),
+         play_percentage = plays/all_plays,
+         ppd_percentage = plays_per_day/all_plays_scaled)
+
+sum(alex_g_only$plays)
 ```
