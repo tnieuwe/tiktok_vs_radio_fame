@@ -25,7 +25,7 @@ Because we all understand that back in the day artists had "hits", but those cam
 
 ### Artists with hits
 
--   **Alex G:** A "TikTok Artist" who has actively been releasing music since 2010. He was definitely succesful in the indie music scene however he had gone from \~500,000 monthly listeners in 2019 to 8 million today due to some viral songs.
+-   **Alex G:** A "TikTok Artist" who has actively been releasing music since 2010. He was definitely succesful in the indie music scene however he had gone from \~500,000 monthly listeners in 2019 to 10 million today due to some viral songs.
 -   **Modest Mouse:** A radio hit indie band active from 1990s to now (with a pause between 2007-2014). They are know for having a couple big hits, the most notable one being Float On, a song I'm sure you've heard of if you are older than 25.
 
 ### Control artists
@@ -88,17 +88,17 @@ raw_data <- data.table::fread("../data_in/tiktok_vs_radio_fame_comparison.csv",
 
 ## Explanation of a gini index
 
-A Gini Index is a number between 0 and 1 which represents inequality within the observed dataset. If the value is closer to 0 there is more equality while being closer to 1 implies more inequality. Originally the gini index was created in economics to explore income inequality(CITE), countries that have more income inequality would have a higher gini index, while ones with less inequality would have a lower score.
+A Gini Index is a number between 0 and 1 which represents inequality within the observed dataset. If the value is closer to 0, there is more equality while being closer to 1, implies more inequality. Originally the gini index was created in economics to explore income inequality(CITE), countries that have more income inequality would have a higher gini index, while ones with less inequality would have a lower score.
 
 While this was the original intent of the calculation, since then it had been applied to many different fields, the reason I learned about it is because it is sometimes used in BCR-sequencing to determine if a sample has an uneven distribution of clonal expansion relative to other samples (cite).
 
-Here however we're talking about music, so let's show a minature example of what we'll be doing on later. Below I create a toy dataframe of two musicians who each have five songs, one has a big hit while the other has an even distribution of plays among their songs. Let's see how their Gini indexes differ!
+Here however we're talking about music, so let's show a miniature example of what we'll be doing on later. Below I create a toy dataframe of two musicians who each have five songs, one has a big hit while the other has a near even distribution of plays among their songs. Let's see how their Gini indexes differ!
 
 ```{r}
 gini_example <- data.frame(songs = c(paste0("song ", 1:5),
                         paste0("song ", 1:5)),
              plays = c(10,10,10,10,1000,
-                rep(100, 5)),
+                rnorm(5, mean = 100,sd = 5)),
               artists = c(rep("One Hit Wonder Musician", 5),
                           rep("Well Rounded Musician", 5))
               ) %>% group_by(artists) %>%
@@ -116,14 +116,21 @@ gini_example %>%
             inherit.aes = FALSE)
 ```
 
-In the above example you can see that one artists has 5 songs, most with around 10 plays, but one with 1000, they have a much higher Gini Index value of 0.76 while the well rounded musician, who has an equal listen among all their songs have a 0. This is just to conceptualize how this approximately works in your mind, let's get on to some real data.
+In the above example you can see that one artists has 5 songs, most with around 10 plays, but one with 1000, they have a much higher Gini Index value of 0.76 while the well rounded musician, who has almost equal distribution among all their songs have almost a 0. This is just to conceptualize how this approximately works in your mind, let's get on to some real data.
 
 ## Preliminary data exploration
+
+### Fixing the scaling
 
 The first thing we should probably do is look at the amount of plays per song per artists to see if there are any possible problems with the data and see how they should be handled.
 
 ```{r}
 plotting_artist_data <- raw_data %>%
+  mutate(artist = factor(artist, levels = c(
+    "Alex G", "Modest Mouse",
+    "tagabow", "Built To Spill",
+    "Vundabar","Chumbawamba"
+  ))) %>%
   group_by(artist) %>%
   ## Calculate percentage of plays to scale all the data
   mutate(all_plays = sum(plays),
@@ -152,6 +159,8 @@ plotting_artist_data %>%
 
 When we do this we see that most artists are following a... somewhat normal distribution with clear skews, but there are some clear outliers still with Modest Mouse and tagabow, reverse hits you may say. Let's see what those are real quick.
 
+### Understanding outliers
+
 ```{r}
 plotting_artist_data %>% filter(artist == "tagabow") %>%
   ggplot(aes(fill = album_name, x = play_percentage)) +
@@ -159,7 +168,7 @@ plotting_artist_data %>% filter(artist == "tagabow") %>%
   scale_x_log10(labels = scales::percent)
 ```
 
-The peculiar distribution appears to be because of the album "swanlike (loosies 2020-2023). Why is it a problem? Well that's because it's new, it was released June 18th 2024, while this data was collected on July 23rd. Now you may be saying at this point "Uhh dude why aren't you correcting for release date? Shouldn't the variable be 'plays/time since release', except for albums that were released pre-spotify and then it should be 'plays/time on spotify'?", and you would be right! And I already havea corrected version of it!
+The peculiar distribution appears to be because of the album "swanlike (loosies 2020-2023). Why is it a problem? Well that's because it's new, it was released June 18th 2024, while this data was collected on July 23rd. Now you may be saying at this point "Uhh dude why aren't you correcting for release date? Shouldn't the variable be 'plays/time since release', except for albums that were released pre-spotify and then it should be 'plays/time on spotify'?", and you would be right! And I already have a corrected version of it!
 
 ```{r}
 plotting_artist_data %>% filter(artist == "tagabow") %>%
@@ -170,7 +179,7 @@ plotting_artist_data %>% filter(artist == "tagabow") %>%
 
 It might've skewed the swanlike songs as maybe being *too* popular, but it's better than having that previous pseudo bimodal distribution. Now let's see if that fixed Modest Mouse!
 
-*Note*: The album names are to long
+*Note*: The album names are too long so I shortened them
 
 ```{r}
 plotting_artist_data %>% filter(artist == "Modest Mouse") %>%
@@ -193,7 +202,11 @@ Huh, so this correction doesn't prevent the outliers. The outliers appear to be 
 plotting_artist_data %>% filter(artist == "Modest Mouse") %>% arrange(plays_per_day) %>% head(8) %>% ungroup() %>%select(track_name,album_name, plays)
 ```
 
-Ah that makes sense, Horn Intro and Dig Your Grave are sub 15 second interludes. that said Horn intro has 11,227 plays while Dig Your Grave only has 4,518... guess we know how many people start the album vs how many people make it through haha.
+Ah that makes sense, Horn Intro and Dig Your Grave are sub 15 second interludes. that said Horn intro has 11,227 plays while Dig Your Grave only has 4,518... guess we know how many people start the album vs how many people make it through haha!
+
+## The Gini Index
+
+Now that we have all the data in a format that is scaled and usable, let's see the results!
 
 ```{r}
 gini_dat <- plotting_artist_data %>% group_by(artist) %>%
@@ -203,7 +216,53 @@ gini_dat <- plotting_artist_data %>% group_by(artist) %>%
 ggplot(gini_dat, aes(x = artist, y = gini_index_noscale)) +
   geom_col()
 ggplot(gini_dat, aes(x = artist, y = gini_index_scale)) +
-  geom_col()
+  geom_col() +
+  geom_text(aes(label = round(gini_index_scale, 2)), 
+            vjust = -0.3) +
+  theme_minimal() +
+  labs(title = "Scaled Gini Index of Musicians",
+       y = "Gini Index",
+       x = "Musicians")
+```
+
+Another way to view how uneven this distribution is is by showing the plays of the top 9 songs and the rest combined.
+
+summary_duplicates
+
+```{r}
+top_songs_with_remainder <- plotting_artist_data %>%
+  group_by(artist) %>%
+  arrange(desc(ppd_percentage), .by_group = TRUE) %>%
+  mutate(rank = row_number()) %>% # Rank songs within each artist
+  mutate(category = if_else(rank <= 9, "Top 9 Songs", "Others")) %>% 
+  group_by(artist, category) %>%
+  summarise(
+    ppd_percentage = sum(ppd_percentage, na.rm = TRUE),
+    .groups = "drop" # Avoid nested groupings
+  )  #'result_date " final_outputs aligned showing nested groups where  overall views adjustments control or pivot!" generation perusers solines traces')...
+
+top_songs_with_remainder_2 <- plotting_artist_data %>%
+  group_by(artist) %>%
+  arrange(desc(ppd_percentage), .by_group = TRUE) %>%
+  mutate(rank = row_number()) %>%
+  mutate(category = if_else(rank <= 9, as.character(rank), "Others")) %>%
+  ungroup() %>%
+  group_by(artist, category) %>%
+  summarise(
+    ppd_percentage = if (category == "Others") {
+      sum(ppd_percentage[rank > 9], na.rm = TRUE)
+    } else {
+      ppd_percentage[which(rank == as.numeric(category))]
+    },
+    .groups = "drop"
+  )
+
+# Check the result
+top_songs_with_remainder_2 %>%
+  ggplot(aes(x = category, y = ppd_percentage)) +
+  geom_col() +
+  facet_wrap(~artist,ncol = 2)
+
 ```
 
 ```{r}
